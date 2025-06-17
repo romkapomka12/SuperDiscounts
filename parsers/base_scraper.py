@@ -10,9 +10,9 @@ class BaseScraper(ABC):
 
 
 
-    @abstractmethod
-    def get_title(self):
-        pass
+    # @abstractmethod
+    # def get_title(self):
+    #     pass
 
     # @abstractmethod
     # def get_all_page(self):
