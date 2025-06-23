@@ -5,3 +5,4 @@ venv/
 *.pyc
 parsers/atb/logs/
 parsers/atb/atb_products.csv
+users_favorites.json
