@@ -11,15 +11,6 @@ from data.save_product import save_to_csv
 from parsers.models import ProductDetail
 
 
-# @dataclass
-# class ProductDetail:
-#     title: str
-#     price: str
-#     old_price: Optional[str] = None
-#     image_url: Optional[str] = None
-#     date: Optional[str] = None
-
-
 
 class ATBParser:
     def __init__(self, driver: WebDriver = None):
@@ -43,7 +34,6 @@ class ATBParser:
 
     def _handle_notification(self) -> None:
         try:
-            # Чекаємо і закриваємо сповіщення
             WebDriverWait(self.driver, 5).until(
                 EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, "iframe[title='Оповищення']")))
             decline_btn = WebDriverWait(self.driver, 5).until(
@@ -55,22 +45,16 @@ class ATBParser:
             logger.debug(f"Запит на сповіщення не знайдено: {e}")
 
     def _solve_cloudflare(self):
-        """Автоматичний обхід Cloudflare"""
         try:
-            # Очікування перевірки Cloudflare
             WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.ID, "challenge-form")))
 
-            # Спробуємо автоматично вирішити капчу
             try:
                 self.driver.find_element(By.XPATH,
                                          "//input[@type='checkbox']").click()
                 time.sleep(2)
             except:
-                pass
-
-            # Очікуємо завершення перевірки
-            WebDriverWait(self.driver, 60).until_not(
+                WebDriverWait(self.driver, 60).until_not(
                 EC.presence_of_element_located((By.ID, "challenge-form")))
 
             return True
@@ -79,14 +63,12 @@ class ATBParser:
             return False
 
     def _get_total_pages(self) -> int:
-        """Визначає загальну кількість сторінок"""
+
         try:
             self.driver.get(self.base_url)
 
-            # 1. Спочатку обробляємо вікове обмеження
             self._accept_age_verification()
 
-            # 2. Чекаємо на завантаження пагінації
             WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, ".product-pagination"))
             )
@@ -94,28 +76,23 @@ class ATBParser:
             max_page = 1
             while True:
                 try:
-                    # Знаходимо кнопку "Показати ще"
                     more_button = WebDriverWait(self.driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "button.product-pagination__more"))
                     )
 
-                    # Отримуємо поточну сторінку
                     current_page = int(more_button.get_attribute("data-page"))
                     if current_page > max_page:
                         max_page = current_page + 1
 
-                    # Клікаємо за допомогою JS
                     self.driver.execute_script("arguments[0].click();", more_button)
                     logger.info(f"Клікнуто 'Показати ще' для сторінки {current_page}")
                     time.sleep(6)
 
-                    # Чекаємо оновлення кнопки
                     WebDriverWait(self.driver, 10).until(
                         lambda d: not d.find_elements(By.CSS_SELECTOR, "button.product-pagination__more") or
                                   d.find_elements(By.CSS_SELECTOR,
                                                   f"button.product-pagination__more[data-page='{current_page + 1}']")
                     )
-                    # time.sleep(6)  # Пауза між кліками
 
                 except Exception as e:
                     logger.info(f"Остання сторінка: {max_page}")
@@ -128,7 +105,6 @@ class ATBParser:
             return 1
 
     def _parse_page(self) -> List[ProductDetail]:
-        """Парсить товари з поточної сторінки"""
         try:
             if not self._solve_cloudflare:
                 self.driver.get(self.base_url)
@@ -172,7 +148,6 @@ class ATBParser:
         return products
 
     def parse_all_pages(self) -> List[ProductDetail]:
-        """Парсить всі сторінки з товарами"""
         all_products = []
         try:
             self._accept_age_verification()
@@ -196,8 +171,6 @@ class ATBParser:
             self.driver.quit()
 
         return all_products
-
-
 
 
 def main():
