@@ -11,7 +11,6 @@ from pandas.core.dtypes.cast import construct_1d_arraylike_from_scalar
 #     [InlineKeyboardButton(text="Всі магазини", callback_data="shop-all")]
 # ])
 
-user_favorites = {}
 
 buttons = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="Обрати магазин")],[KeyboardButton(text="Обрані товари")]
