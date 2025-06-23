@@ -1,13 +1,11 @@
-import os
-import random
-import time
-
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-from config.logger import logger
+from config import logger
+import undetected_chromedriver as uc
+import time
+import random
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -28,22 +26,41 @@ def get_random_headers():
     }
 
 
-def setup_driver() -> webdriver.Chrome:
+def setup_undetected_driver() -> webdriver.Chrome:
     try:
         logger.info("=" * 50)
         logger.info("Ініціалізація Chrome WebDriver")
         logger.info("Локальний запуск")
 
-        options = Options()
-        options.add_argument('--no-sandbox')
-        options.add_argument('--headless=new')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
+        options = uc.ChromeOptions()
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-infobars")
+        options.add_argument("--disable-popup-blocking")
 
+        user_agent = random.choice(USER_AGENTS)
+        options.add_argument(f"--user-agent={user_agent}")
+        logger.debug(f"Використовується User-Agent: {user_agent}")
 
-        service = Service(ChromeDriverManager().install())
+        driver = uc.Chrome(
+            options=options,
+            headless=False,
+            use_subprocess=True
+        )
 
-        driver = webdriver.Chrome(service=service, options=options)
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument", {
+                "source": """
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        })
+                        """
+            })
+
+        driver.execute_cdp_cmd("Network.setUserAgentOverride", {
+            "userAgent": user_agent,
+            "platform": "Win32"
+        })
+
         logger.info("Chrome WebDriver успішно ініціалізовано")
         return driver
 
