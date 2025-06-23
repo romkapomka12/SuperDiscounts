@@ -3,3 +3,5 @@ __pycache__/
 .idea/
 venv/
 *.pyc
+parsers/atb/logs/
+parsers/atb/atb_products.csv
