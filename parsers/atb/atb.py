@@ -1,4 +1,7 @@
+import hashlib
+import os
 import time
+from random import randint
 from typing import List, Optional
 from dataclasses import dataclass
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -7,9 +10,15 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from config import logger, setup_undetected_driver
 from config.logger import setup_logging
-from data.save_product import save_to_csv
+from data.db_manager import save_products_to_db, init_db
 from parsers.models import ProductDetail
+import sys
+import os
+import time
 
+
+PROJECT_ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(PROJECT_ROOT_DIR)
 
 
 class ATBParser:
@@ -118,18 +127,21 @@ class ATBParser:
 
             for item in items:
                 try:
+                    image_url = item.find_element(By.CSS_SELECTOR, "img.catalog-item__img"
+                                                  ).get_attribute("src")
+                    product_id = hashlib.md5(image_url.encode('utf-8')).hexdigest()[:16]
                     title = item.find_element(
                         By.XPATH, ".//div[contains(@class, 'catalog-item__title')]/a"
                     ).text.strip()
-                    price = item.find_element(By.CSS_SELECTOR, ".product-price__top").get_attribute("value")
-                    old_price = item.find_element(By.CSS_SELECTOR, ".product-price__bottom").get_attribute("value")
-                    image_url = item.find_element(By.CSS_SELECTOR, "img.catalog-item__img"
-                ).get_attribute("src")
+                    price = float(item.find_element(By.CSS_SELECTOR, ".product-price__top").get_attribute("value"))
+                    old_price = float(item.find_element(By.CSS_SELECTOR, ".product-price__bottom").get_attribute("value"))
+
                     date = item.find_element(By.CSS_SELECTOR, ".custom-product-label__date").text.strip()
                     tag_shop =  self.tag_shop
 
                     products.append(
                         ProductDetail(
+                            id=product_id,
                             title=title,
                             price=price,
                             old_price=old_price,
@@ -137,6 +149,8 @@ class ATBParser:
                             date=date,
                             tag_shop=tag_shop))
                     logger.debug(f"Додано товар: {title}")
+
+
 
                 except Exception as e:
                     logger.warning(f"Помилка парсингу товару: {e}")
@@ -175,9 +189,12 @@ class ATBParser:
 
 def main():
     logger.info("Запуск парсингу АТБ")
+    init_db()
+
     parser = ATBParser()
     products = parser.parse_all_pages()
-    save_to_csv(products)
+
+    save_products_to_db(products)
     logger.info(f"Парсинг завершено. Знайдено {len(products)} товарів")
 
 
