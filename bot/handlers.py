@@ -1,20 +1,22 @@
 import asyncio
-import os
-import re
 from aiogram import F, Router, types
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 import bot.keyboards as kb
 from bot.favorites_manager import load_favorites, save_favorites
-from data.save_product import load_atb_products_from_csv, search_in_products
+# from data.save_product import load_atb_products_from_csv, search_in_products
 from config import logger
-
+from collections import defaultdict
+from data.db_manager import search_products_in_db
 
 router = Router()
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA_DIR = os.path.join(PROJECT_ROOT, "parsers/atb")
-DATA_FILE = os.path.join(DATA_DIR, "atb_products.csv")
+
+
+
+ALL_PRODUCTS_LIST = []
+PRODUCTS_BY_ID = {}
+
 
 
 
@@ -41,6 +43,7 @@ async def how_are_you(message: Message):
     await message.answer("🔍", reply_markup=kb.shop)
 
 
+
 @router.message(F.text == "Обрані товари")
 async def show_favorites(message: types.Message):
     user_id = str(message.from_user.id)
@@ -52,18 +55,19 @@ async def show_favorites(message: types.Message):
 
     await message.answer(f"💖 Ваші обрані товари ({len(favorites)}):")
 
-    for product in favorites:
-        message_text = (f""
-                        f"📦 <b>{product['title']}</b>\n"
-                        f"💰 <b>{product['price']} грн</b>\n"
-                        f"🏬 <b>{product['tag_shop']}</b>"
-                        )
+    for fav_item in favorites:
+        # Використовуємо збережені дані без пошуку в CSV
+        message_text = (
+            f"📦 <b>{fav_item['title']}</b>\n"
+            f"💰 <b>{fav_item['price']} грн</b>\n"
+            f"🏬 <b>{fav_item['tag_shop']}</b>\n"
+        )
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="❌ Видалити з обраних",
-                    callback_data=f"remove_{product['title']}"
+                    callback_data=f"remove_{fav_item['product_id']}"
                 )
             ]
         ])
@@ -75,70 +79,91 @@ async def show_favorites(message: types.Message):
         )
 
 
-@router.callback_query(F.data.startswith("remove_"))
-async def remove_from_favorites(callback: CallbackQuery):
-    user_id = str(callback.from_user.id)
-    product_title = callback.data.split("remove_")[1]
-
-    favorites = load_favorites(user_id)
-    logger.info(f"favorites")
-
-    updated_favorites = [p for p in favorites if p["title"] != product_title]
-
-    save_favorites(user_id, updated_favorites)
-    await callback.answer(f"Товар '{product_title}' видалено!")
-    await callback.message.delete()
-
-
 @router.callback_query(F.data.startswith("favorite_"))
 async def add_to_favorites(callback: CallbackQuery):
     user_id = str(callback.from_user.id)
-    product_data = callback.data.split("favorite_")[1]
+    product_id = callback.data.split("favorite_")[1]
 
-    if "|" not in product_data:
-        await callback.answer("Помилка: некоректні дані товару")
+    # Шукаємо товар в нашому завантаженому словнику
+    product_to_add = PRODUCTS_BY_ID.get(product_id)
+
+    if not product_to_add:
+        await callback.answer("Помилка: товар не знайдено.")
         return
 
-    product_title, product_price, tag_shop = product_data.split("|", maxsplit=2)
-    logger.info(
-        f"product_title: {product_title}, product_price: {product_price}, tag_shop: {tag_shop}"
-    )
 
     favorites = load_favorites(user_id)
 
-    # Додаємо словник у список обраних
-    favorites.append({
-        "title": product_title,
-        "price": product_price,
-        "tag_shop": tag_shop
-    })
-
-    save_favorites(user_id, favorites)
-    await callback.answer(f"Товар '{product_title}' додано до обраних!")
-
-    # Перевіряємо, чи товар вже є в обраних
-    if not any(p["title"] == product_title for p in favorites):
+    if not any(p.get("product_id") == product_id for p in favorites):
         favorites.append({
-            "title": product_title,
-            "price": product_price,
-            "tag_shop": tag_shop
+            "product_id": product_to_add['id'],
+            "title": product_to_add['title'],
+            "price": product_to_add['price'],
+            "tag_shop": product_to_add['tag_shop'],
+            "image_url": product_to_add['image_url']
         })
         save_favorites(user_id, favorites)
-        await callback.answer(f"Товар '{product_title}' додано до обраних!")
+        await callback.answer(f"Товар '{product_to_add['title'][:30]}...' додано до обраних!")
     else:
         await callback.answer("Цей товар вже є в обраних")
 
 
+@router.callback_query(F.data.startswith("remove_"))
+async def remove_from_favorites(callback: CallbackQuery):
+    user_id = str(callback.from_user.id)
+    product_id = callback.data.split("remove_")[1]
 
-@router.message(lambda message: message.text != "Обрати магазин")
+    favorites = load_favorites(user_id)
+    updated_favorites = [p for p in favorites if p["product_id"] != product_id]
+
+    if len(updated_favorites) < len(favorites):
+        save_favorites(user_id, updated_favorites)
+        await callback.answer("Товар видалено з обраних!")
+        await callback.message.delete()
+    else:
+        await callback.answer("Цього товару вже немає в обраних")
+
+
+@router.message(lambda message: message.text not in ["Обрати магазин", "Обрані товари"])
 async def search_product(message: types.Message):
     query = message.text
-    # Тут логіка пошуку товарів по назві query
-    results = search_in_products(query)
-    if results:
-        await message.answer(f"Знайдено товари за '{query}':\n" + "\n".join(results))
-    else:
-        await message.answer(f"Товарів за '{query}' не знайдено.")
+    if len(query) < 3:
+        await message.answer("Будь ласка, введіть запит довжиною не менше 3 символів.")
+        return
+
+    results = search_products_in_db(query)
+
+    if not results:
+        await message.answer(f"На жаль, за запитом '{query}' нічого не знайдено.")
+        return
+
+    # Групуємо товари за назвою. defaultdict(list) - дуже зручна річ для цього
+    grouped_products = defaultdict(list)
+    for product in results:
+        # Тут можна застосувати ще кращу логіку групування,
+        # наприклад, по перших 2-3 словах назви
+        key = ' '.join(product['normalized_title'].split()[:3])
+        grouped_products[key].append(product)
+
+    await message.answer(f"🔍 Знайдено результати за запитом '{query}':")
+
+    response_text = ""
+    for group_key, products_in_group in grouped_products.items():
+        # Беремо найповнішу назву з групи для заголовка
+        title_for_display = sorted(products_in_group, key=lambda x: len(x['title']), reverse=True)[0]['title']
+        response_text += f"\n🛒 <b>{title_for_display}</b>\n"
+
+        # Сортуємо за ціною, щоб показати найдешевшу пропозицію першою
+        for product in sorted(products_in_group, key=lambda x: x['price']):
+            response_text += f"  - <b>{product['tag_shop']}</b>: {product['price']:.2f} грн\n"
+
+        # Щоб повідомлення не було занадто довгим
+        if len(response_text) > 3500:
+            await message.answer(response_text, parse_mode="HTML")
+            response_text = ""
+
+    if response_text:
+        await message.answer(response_text, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("shop-atb"))
@@ -147,39 +172,49 @@ async def show_products(callback: CallbackQuery):
 
     parts = callback.data.split("-")
     offset = int(parts[2]) if len(parts) == 3 else 0
-    products = load_atb_products_from_csv(DATA_FILE)
     step = 5
-    current_batch = products[offset:offset + step]
+    products_to_show = [p for p in ALL_PRODUCTS_LIST if p['tag_shop'] == 'АТБ-Маркет']
+    current_batch = products_to_show[offset:offset + step]
 
     try:
-        for product in current_batch:
-            sanitized_title = re.sub(r'[^\w\s-]', '_', product.title).strip()
-            max_title_length = 15
-            shortened_title = sanitized_title[:max_title_length]
+        if not current_batch:
+            await callback.message.answer("Більше товарів немає.")
+            return
 
-            caption = f"🏷️  <b>{product.title}</b>\n"
-            caption += f"\n"
-            caption += f"💰 <b>{product.price} грн</b>{' ' * 20}<s>📉{product.old_price} грн</s>\n"
-            caption += f"\n"
-            caption += f"<i>📅  {product.date} </i>"
+        for product in current_batch:  # 'product' - це СЛОВНИК
+            # --- ВИПРАВЛЕННЯ ТУТ: використовуємо доступ за ключем ['key'] ---
 
+            # Назва для callback_data - просто ID, він вже унікальний
+            product_id = product['id']
+            product_title = product['title']
+            product_price = product['price']
+            product_old_price = product['old_price']
+            product_date = product['date']
+            product_image = product['image_url']
+            product_shop = product['tag_shop']
+
+            caption = f"🏷️  <b>{product_title}</b>\n\n"
+            caption += f"💰 <b>{product_price} грн</b>{' ' * 20}<s>📉{product_old_price} грн</s>\n\n"
+            caption += f"<i>📅  {product_date} </i>"
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Додати в обране",
-                        callback_data=f"favorite_{shortened_title}|{product.price}|{product.tag_shop}"
+                        text="💖 Додати в обране",
+                        callback_data=f"favorite_{product_id}"  # Передаємо тільки ID
                     )
                 ]
             ])
-            logger.info(f"{product.title}, {product.price}, {product.tag_shop}")
 
-            if getattr(product, "image_url", None):
+            logger.info(f"Показуємо: {product_title}, {product_price}, {product_shop}")
+
+            # Перевіряємо наявність картинки і відправляємо
+            if product_image:
                 await callback.message.answer_photo(
-                    photo=product.image_url,
+                    photo=product_image,
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup = keyboard
+                    reply_markup=keyboard
                 )
             else:
                 await callback.message.answer(
@@ -187,9 +222,10 @@ async def show_products(callback: CallbackQuery):
                     parse_mode="HTML",
                     reply_markup=keyboard
                 )
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)  # Можна трохи зменшити затримку
 
-        if offset + step < len(products):
+        # Перевірка, чи є ще товари для показу
+        if offset + step < len(products_to_show):
             next_offset = offset + step
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -197,86 +233,10 @@ async def show_products(callback: CallbackQuery):
                     callback_data=f"shop-atb-{next_offset}"
                 )]
             ])
-            await callback.message.answer(text = "⬇️ Ще товари:", reply_markup=keyboard)
+            await callback.message.answer(text="⬇️ Ще товари:", reply_markup=keyboard)
+
     except Exception as e:
+        logger.error(f"Помилка у show_products: {e}", exc_info=True)
         await callback.message.answer("⚠️ Не вдалося завантажити товари.")
-        print(f"Помилка парсингу: {e}")
 
 
-
-
-
-
-# @router.message(F.text == "Обрані товари")
-# async def show_favorites(message: types.Message):
-#     user_id = message.from_user.id
-#     favorites = load_favorites(user_id)
-#
-#     if not favorites:
-#         await message.answer("📭 У вас немає обраних товарів.", reply_markup=kb.buttons)
-#         return
-#
-#     await message.answer(f"💖 Ваші обрані товари ({len(favorites)}):")
-#
-#     for product_title in favorites:
-#         # Створюємо клавіатуру з кнопкою видалення
-#         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-#             [
-#                 InlineKeyboardButton(
-#                     text="❌ Видалити з обраних",
-#                     callback_data=f"remove_{product_title}"
-#                 )
-#             ]
-#         ])
-#
-#         await message.answer(
-#             f"📦 {product_title}",
-#             reply_markup=keyboard
-#         )
-
-
-
-
-# def search_in_products(query: str):
-#     """
-#     Search for products by name
-#
-#     Args:
-#         query (str): Search query string
-#
-#     Returns:
-#         list: List of formatted product strings that match the query
-#     """
-#     products = load_atb_products_from_csv(DATA_FILE)
-#     results = []
-#
-#     # Convert query to lowercase for case-insensitive search
-#     query = query.lower()
-#
-#     for product in products:
-#         if query in product.title.lower():
-#             # Format the product as a string
-#             product_str = f"📦 {product.title} - 💰 {product.price} грн (було {product.old_price} грн)"
-#             results.append(product_str)
-#
-#     return results
-
-
-
-
-
-# @router.callback_query(F.data == "ATB")
-# async def catalog(callback: CallbackQuery):
-#     await callback.answer("Виберіть товари:", show_alert=True)
-#     await callback.message.answer("Товари ATB:")
-
-# @router.message(CommandStart())
-# async def cmd_start(message: Message):
-#     print(f"User {message.from_user.id} started the conversation.")
-#     # await message.reply(
-#     #     f"Привіт!\n Давай прозпочнемо!\n Обери магазин:",
-#     # reply_markup=kb.shop)
-#
-#     await message.reply(
-#         f"Привіт!\n Давай прозпочнемо!\n Обери магазин:",
-#         reply_markup=await kb.inline_shops())
