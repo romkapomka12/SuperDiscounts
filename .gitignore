@@ -4,5 +4,9 @@ __pycache__/
 venv/
 *.pyc
 parsers/atb/logs/
+parsers/silpo/logs/
+
 parsers/atb/atb_products.csv
 users_favorites.json
+
+products.db
