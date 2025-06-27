@@ -3,6 +3,7 @@ from dataclasses import dataclass, fields
 
 @dataclass
 class ProductDetail:
+    id: str
     title: str
     price: float
     old_price: float
