@@ -1,3 +1,5 @@
+import os
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -6,6 +8,11 @@ from config import logger
 import undetected_chromedriver as uc
 import time
 import random
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DB_FILE_PATH = os.path.join(PROJECT_ROOT, "products.db")
+FAVORITES_FILE_PATH = os.path.join(PROJECT_ROOT, "users_favorites.json")
+
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
